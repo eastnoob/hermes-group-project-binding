@@ -157,4 +157,3 @@ def reconcile_shared_memory_bindings(
                     if on_error is not None:
                         on_error(rollback_error)
         raise
-
