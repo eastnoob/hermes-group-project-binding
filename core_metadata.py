@@ -79,4 +79,3 @@ def list_task_agents(config: dict, task_id: str) -> list[dict]:
 def get_agent(config: dict, agent_id: str) -> dict:
     return post_meta(config, "agent/get", {"agent_id": agent_id})
 
-
