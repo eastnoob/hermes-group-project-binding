@@ -621,4 +621,3 @@ def register(ctx):
     ctx.register_hook("post_approval_response", approval_answer)
     ctx.register_middleware("llm_request", apply_scope)
 
-
