@@ -337,4 +337,3 @@ def write_room_binding(state_dir: str | Path, room_id: str, binding: dict) -> No
         if os.path.exists(temporary):
             os.unlink(temporary)
 
-
