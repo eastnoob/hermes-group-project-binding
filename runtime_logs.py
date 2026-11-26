@@ -31,4 +31,3 @@ def append_json_line(path: str | Path, record: dict, *, max_bytes: int, backup_c
                     source.replace(destination)
         with target.open("a", encoding="utf-8") as output:
             output.write(line)
-
