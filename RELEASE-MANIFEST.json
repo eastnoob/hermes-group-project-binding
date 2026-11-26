@@ -28,11 +28,11 @@
     },
     {
       "path": "README.md",
-      "sha256": "ab60ec30bd7fb73120bdb7117acfad424c16e243f13d872d52b3079418d1a62f"
+      "sha256": "ea03c311d1eca72d4473538fe8f5f45cf8c3f2300db28585e77e44bf668c8ddb"
     },
     {
       "path": "INSTALL.md",
-      "sha256": "a0e5f8b72c80b7b167989e89edc5df031d4054b6bbd46d8436bb5ff637ca38e2"
+      "sha256": "48fb4d975d31592e86e103e85648fbb81cf3c7dfb53a0102dcd320b591ec7806"
     },
     {
       "path": "desktop/plugin.js",
