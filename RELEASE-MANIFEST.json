@@ -1,0 +1,43 @@
+{
+  "manifest_version": 1,
+  "plugin": "hermes-group-project-binding",
+  "files": [
+    {
+      "path": "plugin.yaml",
+      "sha256": "d48d5d82e8b59b5bb5b9d6a2fef553db594bdc37c2a7781a88b8dc4bf50bde3c"
+    },
+    {
+      "path": "__init__.py",
+      "sha256": "b6e5e52ef7d7b9f7e5cc606596f0c9650c4b5c12ffe34918423620a93efe6057"
+    },
+    {
+      "path": "binding.py",
+      "sha256": "0b6ce0393fc2511f19ad858bdec6623071b37e083006e05495d44ae1192970f7"
+    },
+    {
+      "path": "core_metadata.py",
+      "sha256": "e99eb50463a1aa06c0dad98d5dd80bca6d636891b13435cc3c31f2eb776f1c09"
+    },
+    {
+      "path": "memory_assets.py",
+      "sha256": "8bf48c673e14849c7d84bc6d0bd596cf9e021356eed7490e3f83a21c25ff2965"
+    },
+    {
+      "path": "runtime_logs.py",
+      "sha256": "ef90ffff1cfce527563e745ab4960dbd4bee8889b60ec3e8f9d65aec0e413003"
+    },
+    {
+      "path": "README.md",
+      "sha256": "ab60ec30bd7fb73120bdb7117acfad424c16e243f13d872d52b3079418d1a62f"
+    },
+    {
+      "path": "INSTALL.md",
+      "sha256": "a0e5f8b72c80b7b167989e89edc5df031d4054b6bbd46d8436bb5ff637ca38e2"
+    },
+    {
+      "path": "desktop/plugin.js",
+      "sha256": "843aa7400c6d6e679a2b8f9f3c0a6df09dbd092b2383d6465fd1a23fa458b456"
+    }
+  ]
+}
+
