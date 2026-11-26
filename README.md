@@ -2,8 +2,10 @@
 
 ## GitHub installation
 
-Publish this package in a private GitHub repository, then install the exact
-release commit in each Hermes profile that should load it:
+Publish this package in a GitHub repository, public or private according to
+your distribution choice, then install the exact release commit in each Hermes
+profile that should load it. The package contains no credentials or profile
+data.
 
 ```text
 hermes plugins install OWNER/REPO --ref <40-character-commit-sha> --enable
