@@ -64,6 +64,12 @@ The conversation ID template includes the project ID because Tencent MemoryProxy
 
 Private sessions bypass this room mapping and keep their own Profile configuration.
 
+In a confirmed group, read the current binding without invoking a model by
+sending `@personalassistant-hub 当前绑定` (or addressing the other room
+member). Use `@personalassistant-hub 绑定校验` to recheck the saved room scope
+against the current roster and Core metadata. These replies never expose
+credentials or routing headers.
+
 `rooms` is optional. Omit it to let the plugin discover rooms from the owner Gateway. An unlisted or unconfirmed room continues with native Hermes routing until it receives a project initialization command.
 
 Runtime diagnostics are written to `runtime-trace.jsonl` and `runtime-errors.jsonl`. Each file is capped at 256 KiB with three rotated backups, so recent routing and failure evidence remains available without unbounded log or cache growth.
