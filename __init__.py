@@ -85,7 +85,7 @@ from tools.approval import request_tool_approval
 
 HERE = Path(__file__).resolve().parent
 PREFIX = "Hermes project binding "
-BUILD_ID = "webapp-routing-20261125-r25"
+BUILD_ID = "webapp-routing-20261127-status-r26"
 RUNTIME_LOG_MAX_BYTES = 256 * 1024
 RUNTIME_LOG_BACKUPS = 3
 BLOCKED = "本群项目归属无法验证，本回合未发出模型请求"
