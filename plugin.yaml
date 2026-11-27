@@ -1,5 +1,5 @@
 name: hermes-group-project-binding
-version: "0.1.2"
+version: "0.1.3"
 description: Room project confirmation and official Tencent header routing
 provides_hooks:
   - pre_llm_call
