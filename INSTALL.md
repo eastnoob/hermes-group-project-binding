@@ -20,3 +20,6 @@ In a confirmed room, send `@personalassistant-hub 当前绑定` to display the
 current project scope in the group without invoking a model. Use
 `@personalassistant-hub 绑定校验` for a read-only roster/Core consistency
 check. The response never includes credentials or routing headers.
+
+In the WebApp form, changing the Task preserves a previously selected shared
+Chat Memory asset; the choice is included in the owner proposal.
