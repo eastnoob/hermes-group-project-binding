@@ -70,6 +70,9 @@ member). Use `@personalassistant-hub 绑定校验` to recheck the saved room sco
 against the current roster and Core metadata. These replies never expose
 credentials or routing headers.
 
+When using the WebApp form, choose the shared Chat Memory before or after the
+Task; changing the Task keeps the selected asset in the proposal.
+
 `rooms` is optional. Omit it to let the plugin discover rooms from the owner Gateway. An unlisted or unconfirmed room continues with native Hermes routing until it receives a project initialization command.
 
 Runtime diagnostics are written to `runtime-trace.jsonl` and `runtime-errors.jsonl`. Each file is capped at 256 KiB with three rotated backups, so recent routing and failure evidence remains available without unbounded log or cache growth.
