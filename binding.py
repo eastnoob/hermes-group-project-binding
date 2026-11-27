@@ -14,6 +14,7 @@ from typing import Any
 REQUIRED_SCOPE_FIELDS = ("space_id", "team_id", "task_id")
 ROLE_PROPOSAL_VERSION = 1
 COMMAND = re.compile(r"@([A-Za-z0-9_.-]+)\s+(初始化|切换项目)\s+([A-Za-z0-9_.-]+)")
+STATUS_COMMAND = re.compile(r"@([A-Za-z0-9_.-]+)\s+(当前绑定|绑定校验)")
 TURN_ID = re.compile(
     r"^d(?P<source>[1-9][0-9]*)\.r(?P<round>0|[1-9][0-9]*)\."
     r"p(?P<position>[0-5])\.s(?P<seen>[1-9][0-9]*)\.m(?P<member>[0-9a-f]{24})$"
@@ -128,6 +129,45 @@ def parse_project_command(text):
     if match is None:
         return None
     return ("confirm" if match.group(2) == "初始化" else "switch", match.group(3), match.group(1))
+
+
+def parse_status_command(text):
+    match = STATUS_COMMAND.search(str(text or ""))
+    if match is None:
+        return None
+    return ("summary" if match.group(2) == "当前绑定" else "validate", match.group(1))
+
+
+def format_binding_status(status: str, project: str | None, scope: dict | None, reason: str | None = None) -> str:
+    """Format a room binding summary without exposing credentials or agent IDs."""
+    labels = {
+        "confirmed": "已确认",
+        "unbound": "未确认",
+        "stale": "已失效",
+    }
+    lines = [f"当前群绑定：{labels.get(status, status)}"]
+    if project:
+        lines.append(f"项目：{project}")
+    if isinstance(scope, dict):
+        if scope.get("team_id"):
+            lines.append(f"Team：{scope['team_id']}")
+        if scope.get("task_id"):
+            lines.append(f"Task：{scope['task_id']}")
+        roles = scope.get("roles") or {}
+        role_lines = []
+        for role in roles.values():
+            if not isinstance(role, dict):
+                continue
+            handle = role.get("handle") or role.get("profile")
+            role_name = role.get("role_in_task") or "已认领角色"
+            if handle:
+                role_lines.append(f"{handle} → {role_name}")
+        if role_lines:
+            lines.append("成员角色：" + "；".join(role_lines))
+        lines.append("共享 Chat Memory：已配置" if scope.get("shared_memory_id") else "记忆：仅角色私有记忆")
+    if reason:
+        lines.append(f"原因：{reason}")
+    return "\n".join(lines)
 
 
 def _mapping(value: Any, label: str) -> dict:
