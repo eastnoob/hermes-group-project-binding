@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "plugin.yaml",
-      "sha256": "1f0a034fd6bab0659ece68c8b43c08db3416072b9c0488d991a50d50a3c28944"
+      "sha256": "e48a2bb9cbde64c7746c34caaf6658491132214b3825e680f2574ce6782d6b44"
     },
     {
       "path": "__init__.py",
@@ -28,15 +28,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "86ce4831e9672d6576d36f401e1c5b4857f4cfa65835c73e877977fae73dfbc9"
+      "sha256": "943902fb537dae3161ebdce0e8607815cd99b1dc1ed4f389dd3024f1d7a8507c"
     },
     {
       "path": "INSTALL.md",
-      "sha256": "1b3d1921497417498d60ac7b20c2bbd68552606d20572f9be1c38acfe11440b4"
+      "sha256": "4a1aaf7637db8991133eef73a6cc868efbbbe2a13f87f9297326101b2f24babc"
     },
     {
       "path": "desktop/plugin.js",
-      "sha256": "843aa7400c6d6e679a2b8f9f3c0a6df09dbd092b2383d6465fd1a23fa458b456"
+      "sha256": "2e038492bdfb6e7eda15cbaf40cbb23d2547227483f73f153633b4c738493006"
     }
   ]
 }
