@@ -218,7 +218,6 @@ function RoleClaimPanel() {
     setTaskId(id)
     setOptions([])
     setSelections({})
-    setSharedMemoryId('')
     if (!id) return
     setMessage('正在读取当前项目的角色目录…')
     try {
