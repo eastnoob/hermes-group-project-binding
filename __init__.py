@@ -17,6 +17,8 @@ try:
         build_scope,
         load_projects,
         parse_project_command,
+        parse_status_command,
+        format_binding_status,
         read_room_binding,
         replace_current_turn,
         select_source_event,
@@ -44,6 +46,8 @@ except ImportError:
         build_scope,
         load_projects,
         parse_project_command,
+        parse_status_command,
+        format_binding_status,
         read_room_binding,
         replace_current_turn,
         select_source_event,
@@ -540,6 +544,47 @@ def _binding_for_turn(config, state, member, source, events):
             "source_text": source["payload"]["text"]}
 
 
+def _status_for_room(config, state, member, source, events):
+    """Read and validate the current room binding without routing a model turn."""
+    room_id = state["room"]["room_id"]
+    record = read_room_binding(state_dir(config), room_id)
+    displayed = read_context_binding(state["context"].get("notes"))
+    if record is None:
+        return result(format_binding_status("unbound", None, None,
+                                            "当前房间没有持久化绑定"))
+    if displayed != record:
+        return result(format_binding_status(
+            "stale", record.get("project"), record.get("scope"),
+            "房间上下文与持久化绑定不一致"))
+    try:
+        boundary = next(event for event in events if event["event_id"] == record["event_id"])
+        if source["seq"] <= boundary["seq"]:
+            raise ValueError("当前消息早于绑定确认")
+        if "proposal" in record:
+            stored_scope = record["scope"]
+            selections = {
+                member_id: {"task_link_id": role.get("task_link_id")}
+                for member_id, role in stored_scope.get("roles", {}).items()
+            }
+            current = resolve_dynamic_scope(
+                config, state["room"], stored_scope.get("team_id"), stored_scope.get("task_id"), selections,
+                stored_scope.get("shared_memory_id"),
+            )
+        else:
+            current = project_scope(config, state["room"], record["project"])
+        if current != record["scope"]:
+            raise ValueError("项目范围已变化")
+        if "proposal" in record:
+            validate_role_proposal(record["proposal"], current)
+        if member["member_id"] not in current["roles"]:
+            raise ValueError("当前成员不在绑定角色中")
+    except (KeyError, StopIteration, TypeError, ValueError):
+        return result(format_binding_status(
+            "stale", record.get("project"), record.get("scope"),
+            "当前绑定与房间或 Core 元数据不一致"))
+    return result(format_binding_status("confirmed", record["project"], current))
+
+
 def confirm_or_route(session_id, turn_id, user_message=None, **_):
     if session_surface() != "bot_room" or not isinstance(user_message, str):
         return None
@@ -554,6 +599,12 @@ def confirm_or_route(session_id, turn_id, user_message=None, **_):
         if current is None:
             return None
         state, member, source, events = current
+        status_command = parse_status_command(source["payload"]["text"])
+        if status_command is not None:
+            _mode, handle = status_command
+            if handle != member["handle"]:
+                return None
+            return _status_for_room(config, state, member, source, events)
         command = parse_project_command(source["payload"]["text"])
         if command is None:
             record = read_room_binding(state_dir(config), state["room"]["room_id"])
