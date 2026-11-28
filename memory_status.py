@@ -361,65 +361,54 @@ class MemoryStatusCoordinator:
 
 
 class MemoryStatusNotifier:
-    """Adapter around Hermes ``ctx.post_message`` with a fail-closed edit gate."""
+    """Post one concise notice only after a scoped L1 write is confirmed.
+
+    Hermes' native memory notification is write-triggered: a normal turn with no
+    memory mutation is silent.  Keep the same rule here.  The status store still
+    records every outcome for the WebApp panel; this adapter is only the optional
+    human-facing notice path.
+    """
 
     def __init__(self, post_message, *, capability: dict[str, Any]) -> None:
         self._post_message = post_message
         self.capability = capability
-        self._handles: dict[tuple[str, int, int, str], Any] = {}
-
-    @staticmethod
-    def _group_key(context: TurnObservationContext) -> tuple[str, int, int, str]:
-        return (
-            context.room_id,
-            context.authority_epoch,
-            context.source_event_seq,
-            context.binding_revision,
-        )
 
     def begin(self, context: TurnObservationContext, member_ids: tuple[str, ...] | list[str]) -> str | None:
-        if not self.capability.get("enabled") or not self.capability.get("editable"):
+        # Deliberately silent while extraction is running.  ``context`` and
+        # ``member_ids`` remain in the signature for hook compatibility.
+        return None
+
+    @staticmethod
+    def _write_summary(statuses: list[dict[str, Any]]) -> str | None:
+        written: list[str] = []
+        for row in statuses:
+            if row.get("status") != "updated":
+                continue
+            key = row.get("key") if isinstance(row.get("key"), Mapping) else {}
+            member = str(key.get("member_id") or "未知角色")
+            ids = row.get("new_ids")
+            count = len(ids) if isinstance(ids, (list, tuple, set)) else 0
+            # ``updated`` is only emitted by the source with a new output ref;
+            # retain a truthful one-item fallback for old persisted rows.
+            written.append(f"{member} {count or 1} 条")
+        if not written:
             return None
-        text = "🧠 记忆处理中 · " + "、".join(str(member) for member in member_ids)
-        try:
-            handle = self._post_message(text)
-        except Exception:
-            self.capability["editable"] = False
-            return None
-        if handle is None or getattr(handle, "ok", True) is False:
-            self.capability["editable"] = False
-            return None
-        message_id = getattr(handle, "message_id", None)
-        if not message_id:
-            self.capability["editable"] = False
-            return None
-        self._handles[self._group_key(context)] = handle
-        return str(message_id)
+        return "🧠 L1 已写入：" + "、".join(written)
 
     def finalize(self, context: TurnObservationContext, statuses: list[dict[str, Any]], *, late: bool = False) -> None:
         if late:
             return
-        handle = self._handles.pop(self._group_key(context), None)
-        if handle is None or not self.capability.get("editable"):
+        if not self.capability.get("enabled") or not self.capability.get("editable"):
             return
-        labels = []
-        status_labels = {
-            "updated": "已更新",
-            "no_change": "本轮无新增",
-            "unknown_timeout": "无法确认",
-            "failed": "处理失败",
-            "processing": "处理中",
-            "queued": "排队中",
-        }
-        for row in statuses:
-            member = row.get("key", {}).get("member_id", "unknown")
-            labels.append(f"{member} {status_labels.get(row.get('status'), '无法确认')}")
-        text = "🧠 L1：" + " · ".join(labels)
+        text = self._write_summary(statuses)
+        if not text:
+            return
         try:
-            result = handle.edit(text)
+            handle = self._post_message(text)
         except Exception:
-            result = {"ok": False}
-        if not isinstance(result, Mapping) or not result.get("ok") or result.get("fallback"):
+            self.capability["editable"] = False
+            return
+        if handle is None or getattr(handle, "ok", True) is False:
             self.capability["editable"] = False
 
 

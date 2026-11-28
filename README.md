@@ -107,6 +107,9 @@ notice, and does not store prompt or memory content in the status file. The
 Core token must be supplied outside GitHub (for example through the external
 project options file or `MEMORY_STATUS_CORE_SERVICE_TOKEN`).
 
-Group notices use concise labels such as `🧠 记忆处理中 · hub、slave` followed
-by `🧠 L1：hub 已更新 · slave 本轮无新增`. Unknown or failed evidence is shown
-as `无法确认`/`处理失败`; it is never rendered as an L1 success.
+Group notices follow Hermes' native write-notification behavior: they stay silent
+while extraction is running and when a turn adds nothing. After a scoped L1
+write is confirmed, one concise notice is shown, for example
+`🧠 L1 已写入：hub 2 条`. Unknown, failed, and no-change results remain in the
+WebApp status panel and are never rendered as an L1 success. The notice contains
+the role and count only; memory content is not copied into the chat.

@@ -25,6 +25,8 @@ the external project options file or environment:
 }
 ```
 
-Enable group notices only after the Hermes `bot_room` post/edit capability probe
-passes. If the Core source or editable message capability is unavailable, the
-WebApp panel remains the source of truth.
+Enable group notices only after the Hermes `bot_room` post capability probe
+passes. Notices are write-triggered: no-change, processing, unknown, and failed
+turns stay silent in chat while remaining visible in the WebApp panel. If the
+Core source or post capability is unavailable, the WebApp panel remains the
+source of truth.

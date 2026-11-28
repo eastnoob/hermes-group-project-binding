@@ -4,11 +4,11 @@
   "files": [
     {
       "path": "plugin.yaml",
-      "sha256": "d05971fdd89b091f034aef68f5b648b9a2f4990690a92d7f1b5e7759bdcf88fe"
+      "sha256": "c133db9c9ecc2e9172d4955eb198bf0493e7089a63b4f5bbd74be6e946f49a59"
     },
     {
       "path": "__init__.py",
-      "sha256": "59225115e6620aad4b5572f5d7d3ba77d50e734434771a9f03766f67c196a01f"
+      "sha256": "bbef7cfcf7a9199bb49f96159a5933e527b706d8a9cdec7187c9084466ccf570"
     },
     {
       "path": "binding.py",
@@ -24,7 +24,7 @@
     },
     {
       "path": "memory_status.py",
-      "sha256": "075a48f3ccba6bd673bdbc5193f8cb35a8aa475359e028c0cbde4f67983e1979"
+      "sha256": "62b1c1d33ba7753f2867bd97013694aac9c999397aa3931f61ba604cdb57e4ea"
     },
     {
       "path": "memory_status_source.py",
@@ -36,15 +36,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "308df1d54525a44adfb7a9a0389dcc644c52a7fb03c80e707bd5c4a448e7dc51"
+      "sha256": "d224b8b0efe7c4ea1e3775aefba5ad71acf75e102e6f86b0b4ce0f1a24c399f2"
     },
     {
       "path": "INSTALL.md",
-      "sha256": "21159ed12926caacabb34b94a24b062f7afe8f70262d168abcc939e1cd47fc4d"
+      "sha256": "a8070c28d123ea10aa8d800ead69f2ee404c2aaf8b2d89aabb3fb7d5ce890f4f"
     },
     {
       "path": "desktop/plugin.js",
-      "sha256": "28d7d4dc51cc7aae997893b7adf418ba30dd5551956073970ecf45088aaf5148"
+      "sha256": "69d9b4005dc2e155eb27a125a817a963300b943329694c4deece76ab2d98a4fe"
     }
   ]
 }

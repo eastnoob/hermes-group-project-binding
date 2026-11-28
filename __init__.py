@@ -99,7 +99,7 @@ from tools.approval import request_tool_approval
 
 HERE = Path(__file__).resolve().parent
 PREFIX = "Hermes project binding "
-BUILD_ID = "webapp-routing-20261128-memory-live-r30"
+BUILD_ID = "webapp-routing-20261128-memory-write-notice-r31"
 RUNTIME_LOG_MAX_BYTES = 256 * 1024
 RUNTIME_LOG_BACKUPS = 3
 BLOCKED = "本群项目归属无法验证，本回合未发出模型请求"

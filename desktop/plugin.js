@@ -5,19 +5,31 @@ const h = React.createElement
 const { Button, ROUTES_AREA, host } = sdk
 const SIDEBAR_NAV_AREA = 'sidebar.nav'
 const MEMORY_NOTICE_PREFIX = 'plugin-message:hermes-group-project-binding:'
+const MEMORY_NOTICE_DEDUP_MS = 10000
+const recentMemoryNoticeTexts = new Map()
+
+function claimMemoryNotice(text) {
+  const now = Date.now()
+  for (const [key, seenAt] of recentMemoryNoticeTexts) {
+    if (now - seenAt > MEMORY_NOTICE_DEDUP_MS) recentMemoryNoticeTexts.delete(key)
+  }
+  if (recentMemoryNoticeTexts.has(text)) return false
+  recentMemoryNoticeTexts.set(text, now)
+  return true
+}
 
 function forwardMemoryStatusNotice(event) {
   const payload = event?.payload ?? {}
   const key = String(payload.key ?? payload.id ?? '')
   const text = String(payload.text ?? '').trim()
-  if (!key.startsWith(MEMORY_NOTICE_PREFIX) || !text || typeof host.notify !== 'function') return
-  const processing = text.includes('处理中')
+  if (!key.startsWith(MEMORY_NOTICE_PREFIX) || !text || !text.includes('L1 已写入') || typeof host.notify !== 'function') return
+  if (!claimMemoryNotice(text)) return
   host.notify({
     id: key,
     kind: 'info',
     message: text,
-    durationMs: processing ? 0 : 8000,
-    persistent: processing,
+    durationMs: 8000,
+    persistent: false,
   })
 }
 
@@ -30,19 +42,19 @@ function memoryStatusGroupKey(row) {
 
 function memoryStatusNotice(rows) {
   const ordered = [...rows].sort((a, b) => String(a?.key?.member_id ?? '').localeCompare(String(b?.key?.member_id ?? '')))
-  const labels = {
-    updated: '已更新',
-    no_change: '本轮无新增',
-    failed: '处理失败',
-    unknown_timeout: '无法确认',
-    processing: '处理中',
-    queued: '排队中',
-  }
   const complete = ordered.length > 0 && ordered.every(row => MEMORY_STATUS_TERMINAL.has(row?.status))
-  const text = complete
-    ? `🧠 L1：${ordered.map(row => `${row?.key?.member_id ?? '未知角色'} ${labels[row?.status] ?? '无法确认'}`).join(' · ')}`
-    : `🧠 记忆处理中 · ${ordered.map(row => row?.key?.member_id ?? '未知角色').join('、')}`
-  return { text, complete }
+  const written = ordered
+    .filter(row => row?.status === 'updated')
+    .map(row => {
+      const member = row?.key?.member_id ?? '未知角色'
+      const count = Array.isArray(row?.new_ids) && row.new_ids.length > 0 ? row.new_ids.length : 1
+      return `${member} ${count} 条`
+    })
+  return {
+    text: complete && written.length ? `🧠 L1 已写入：${written.join('、')}` : '',
+    complete,
+    shouldNotify: complete && written.length > 0,
+  }
 }
 
 function startMemoryStatusToastPoller() {
@@ -74,16 +86,17 @@ function startMemoryStatusToastPoller() {
           groups.set(group, bucket)
         }
         for (const [group, rows] of groups) {
-          const { text, complete } = memoryStatusNotice(rows)
+          const { text, complete, shouldNotify } = memoryStatusNotice(rows)
           const id = `hermes-memory-status:${group}`
-          const state = `${complete ? 'complete' : 'processing'}:${text}`
+          const state = `${complete ? 'complete' : 'processing'}:${shouldNotify ? text : 'silent'}`
           seen.add(id)
           if (!initialized || states.get(id) === state) {
             states.set(id, state)
             continue
           }
           states.set(id, state)
-          host.notify({ id, kind: 'info', message: text, durationMs: complete ? 8000 : 0, persistent: !complete })
+          if (!shouldNotify || !claimMemoryNotice(text)) continue
+          host.notify({ id, kind: 'info', message: text, durationMs: 8000, persistent: false })
         }
       }
       for (const id of states.keys()) if (!seen.has(id)) states.delete(id)
