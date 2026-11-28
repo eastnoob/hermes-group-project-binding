@@ -21,6 +21,83 @@ function forwardMemoryStatusNotice(event) {
   })
 }
 
+const MEMORY_STATUS_TERMINAL = new Set(['updated', 'no_change', 'failed', 'unknown_timeout'])
+
+function memoryStatusGroupKey(row) {
+  const key = row?.key ?? {}
+  return [key.room_id, key.authority_epoch, key.source_event_seq, key.binding_revision].join(':')
+}
+
+function memoryStatusNotice(rows) {
+  const ordered = [...rows].sort((a, b) => String(a?.key?.member_id ?? '').localeCompare(String(b?.key?.member_id ?? '')))
+  const labels = {
+    updated: '已更新',
+    no_change: '本轮无新增',
+    failed: '处理失败',
+    unknown_timeout: '无法确认',
+    processing: '处理中',
+    queued: '排队中',
+  }
+  const complete = ordered.length > 0 && ordered.every(row => MEMORY_STATUS_TERMINAL.has(row?.status))
+  const text = complete
+    ? `🧠 L1：${ordered.map(row => `${row?.key?.member_id ?? '未知角色'} ${labels[row?.status] ?? '无法确认'}`).join(' · ')}`
+    : `🧠 记忆处理中 · ${ordered.map(row => row?.key?.member_id ?? '未知角色').join('、')}`
+  return { text, complete }
+}
+
+function startMemoryStatusToastPoller() {
+  if (typeof host.notify !== 'function' || typeof host.request !== 'function') return () => {}
+  const states = new Map()
+  let initialized = false
+  let stopped = false
+
+  const tick = async () => {
+    if (stopped) return
+    try {
+      const roomRows = await rooms()
+      const responses = await Promise.all(roomRows.slice(0, 100).map(async room => {
+        try {
+          const value = await groupCommand(room.room_id, { action: 'memory-status', limit: 50 })
+          return { roomId: room.room_id, rows: memoryStatusItems(value) }
+        } catch {
+          return { roomId: room.room_id, rows: [] }
+        }
+      }))
+      const seen = new Set()
+      for (const response of responses) {
+        const groups = new Map()
+        for (const row of response.rows) {
+          const group = memoryStatusGroupKey(row)
+          if (!group) continue
+          const bucket = groups.get(group) ?? []
+          bucket.push(row)
+          groups.set(group, bucket)
+        }
+        for (const [group, rows] of groups) {
+          const { text, complete } = memoryStatusNotice(rows)
+          const id = `hermes-memory-status:${group}`
+          const state = `${complete ? 'complete' : 'processing'}:${text}`
+          seen.add(id)
+          if (!initialized || states.get(id) === state) {
+            states.set(id, state)
+            continue
+          }
+          states.set(id, state)
+          host.notify({ id, kind: 'info', message: text, durationMs: complete ? 8000 : 0, persistent: !complete })
+        }
+      }
+      for (const id of states.keys()) if (!seen.has(id)) states.delete(id)
+      initialized = true
+    } catch {
+      // The panel remains the source of truth while a profile/session is unavailable.
+    }
+  }
+
+  const timer = setInterval(() => { void tick() }, 3000)
+  void tick()
+  return () => { stopped = true; clearInterval(timer) }
+}
+
 function createRequestEpoch() {
   let current = 0
   return {
@@ -430,6 +507,7 @@ export default {
       data: { path: '/group-project-binding' },
       render: () => h(RoleClaimPanel)
     })
+    const disposePoller = startMemoryStatusToastPoller()
     let disposeNav = () => {}
     try {
       disposeNav = ctx.register({
@@ -442,6 +520,7 @@ export default {
     }
     ctx.onDispose(() => {
       disposeNotice()
+      disposePoller()
       dispose()
       disposeNav()
     })
