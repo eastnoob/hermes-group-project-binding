@@ -99,7 +99,7 @@ from tools.approval import request_tool_approval
 
 HERE = Path(__file__).resolve().parent
 PREFIX = "Hermes project binding "
-BUILD_ID = "webapp-routing-20261128-memory-live-r27"
+BUILD_ID = "webapp-routing-20261128-memory-live-r28"
 RUNTIME_LOG_MAX_BYTES = 256 * 1024
 RUNTIME_LOG_BACKUPS = 3
 BLOCKED = "本群项目归属无法验证，本回合未发出模型请求"
@@ -109,6 +109,23 @@ APPROVALS = {}
 MEMORY_STATUS_COORDINATORS = {}
 MEMORY_STATUS_CONTEXT = None
 MEMORY_STATUS_CONTEXTS = {}
+MEMORY_STATUS_CONTEXT_MAX = 256
+MEMORY_STATUS_CONTEXT_TTL = 86400.0
+
+
+def _remember_memory_status_context(key, context):
+    """Keep pre-turn contexts bounded when a host drops a post-turn callback."""
+    now = time.time()
+    cutoff = now - MEMORY_STATUS_CONTEXT_TTL
+    for old_key, old_context in list(MEMORY_STATUS_CONTEXTS.items()):
+        if float(getattr(old_context, "observed_after", 0.0) or 0.0) < cutoff:
+            MEMORY_STATUS_CONTEXTS.pop(old_key, None)
+    while len(MEMORY_STATUS_CONTEXTS) >= MEMORY_STATUS_CONTEXT_MAX:
+        oldest_key = next(iter(MEMORY_STATUS_CONTEXTS), None)
+        if oldest_key is None:
+            break
+        MEMORY_STATUS_CONTEXTS.pop(oldest_key, None)
+    MEMORY_STATUS_CONTEXTS[key] = context
 
 
 def result(message):
@@ -151,13 +168,21 @@ def _memory_status_coordinator(config):
         status_config = config.get("memoryStatus") or {}
         source = _memory_status_source(config) if status_config.get("enabled") else None
         notifier = None
-        if status_config.get("enabled") and status_config.get("groupNoticeEnabled") and MEMORY_STATUS_CONTEXT is not None:
+        if (
+            source is not None
+            and status_config.get("enabled")
+            and status_config.get("groupNoticeEnabled")
+            and MEMORY_STATUS_CONTEXT is not None
+        ):
             notifier = MemoryStatusNotifier(
                 MEMORY_STATUS_CONTEXT.post_message,
                 capability={"enabled": True, "editable": True},
             )
         coordinator = MemoryStatusCoordinator(
-            store=MemoryStatusStore(path), source=source, notifier=notifier,
+            store=MemoryStatusStore(path),
+            source=source,
+            notifier=notifier,
+            require_prepared_baseline=True,
         )
         MEMORY_STATUS_COORDINATORS[key] = coordinator
     return coordinator
@@ -691,7 +716,7 @@ def observe_memory_before_turn(session_id="", turn_id="", user_message=None, **k
         )
         if context is None:
             return None
-        MEMORY_STATUS_CONTEXTS[(session_id, turn_id)] = context
+        _remember_memory_status_context((session_id, turn_id), context)
         _memory_status_coordinator(config).prepare(context)
     except Exception as error:
         note_error(error)

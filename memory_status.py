@@ -101,6 +101,7 @@ class MemoryStatusCoordinator:
         clock=time.time,
         deadline_seconds: float = 90.0,
         interval_seconds: float = 2.0,
+        require_prepared_baseline: bool = False,
     ) -> None:
         self.store = store
         self.notifier = notifier
@@ -108,10 +109,12 @@ class MemoryStatusCoordinator:
         self.clock = clock
         self.deadline_seconds = float(deadline_seconds)
         self.interval_seconds = float(interval_seconds)
+        self.require_prepared_baseline = bool(require_prepared_baseline)
         self._groups: dict[tuple[str, int, int, str], TurnObservationContext] = {}
         self._message_ids: dict[tuple[str, int, int, str], str | None] = {}
         self._polling: dict[MemoryObservationKey, threading.Thread] = {}
-        self._baselines: dict[MemoryObservationKey, Any] = {}
+        self._baselines: dict[MemoryObservationKey, tuple[Any, float]] = {}
+        self._baseline_errors: dict[MemoryObservationKey, tuple[str, float]] = {}
         self._finalized_groups: set[tuple[str, int, int, str]] = set()
 
     @staticmethod
@@ -190,13 +193,22 @@ class MemoryStatusCoordinator:
         self._message_ids[group_key] = message_id
         for member_id in context.expected_member_ids:
             scope = dict(context.scopes.get(member_id) or {})
+            key = self._key(context, member_id)
             self.store.begin(
-                self._key(context, member_id),
+                key,
                 panel_only=message_id is None,
                 message_id=message_id,
                 scope=scope,
             )
-            self._start_poll(context, member_id, self._baselines.pop(self._key(context, member_id), None))
+            baseline_error_entry = self._baseline_errors.pop(key, None)
+            baseline_entry = self._baselines.pop(key, None)
+            if baseline_error_entry is not None:
+                self.store.transition(key, "failed", error_code=baseline_error_entry[0])
+            elif self.require_prepared_baseline and baseline_entry is None:
+                self.store.transition(key, "failed", error_code="memory_baseline_missing")
+            else:
+                baseline = baseline_entry[0] if baseline_entry is not None else None
+                self._start_poll(context, member_id, baseline)
         return message_id
 
     def prepare(self, context: TurnObservationContext) -> None:
@@ -208,6 +220,27 @@ class MemoryStatusCoordinator:
             or self.source is None
         ):
             return
+        cutoff = float(self.clock()) - float(self.store.ttl_seconds)
+        for key, (_baseline, created_at) in list(self._baselines.items()):
+            if created_at < cutoff:
+                self._baselines.pop(key, None)
+        for key, (_error, created_at) in list(self._baseline_errors.items()):
+            if created_at < cutoff:
+                self._baseline_errors.pop(key, None)
+        max_entries = max(1, int(self.store.max_entries))
+        while len(self._baselines) + len(self._baseline_errors) > max_entries:
+            candidates = [
+                (key, created_at)
+                for key, (_baseline, created_at) in self._baselines.items()
+            ] + [
+                (key, created_at)
+                for key, (_error, created_at) in self._baseline_errors.items()
+            ]
+            if not candidates:
+                break
+            oldest_key, _created_at = min(candidates, key=lambda item: float(item[1]))
+            self._baselines.pop(oldest_key, None)
+            self._baseline_errors.pop(oldest_key, None)
         for member_id in context.expected_member_ids:
             key = self._key(context, member_id)
             if key in self._baselines:
@@ -223,9 +256,9 @@ class MemoryStatusCoordinator:
                 observed_after=float(context.observed_after or self.clock()),
             )
             try:
-                self._baselines[key] = self.source.snapshot_baseline(observation)
+                self._baselines[key] = (self.source.snapshot_baseline(observation), float(self.clock()))
             except Exception:
-                self._baselines[key] = None
+                self._baseline_errors[key] = ("memory_baseline_error", float(self.clock()))
 
     def _start_poll(self, context: TurnObservationContext, member_id: str, baseline=None) -> None:
         if self.source is None:
@@ -318,7 +351,12 @@ class MemoryStatusCoordinator:
         ]
         if member_rows and all(candidate["status"] in TERMINAL_STATES for candidate in member_rows):
             self._finalized_groups.add(group_key)
-            self.notifier.finalize(context, member_rows, late=False)
+            try:
+                self.notifier.finalize(context, member_rows, late=False)
+            finally:
+                self._groups.pop(group_key, None)
+                self._message_ids.pop(group_key, None)
+                self._finalized_groups.discard(group_key)
         return row
 
 
@@ -361,7 +399,7 @@ class MemoryStatusNotifier:
     def finalize(self, context: TurnObservationContext, statuses: list[dict[str, Any]], *, late: bool = False) -> None:
         if late:
             return
-        handle = self._handles.get(self._group_key(context))
+        handle = self._handles.pop(self._group_key(context), None)
         if handle is None or not self.capability.get("editable"):
             return
         labels = []
