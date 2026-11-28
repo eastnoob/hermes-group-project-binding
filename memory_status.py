@@ -1,10 +1,11 @@
-"""Bounded, metadata-only state for asynchronous memory extraction status."""
+"""Bounded state and plugin-side notice formatting for memory extraction status."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 import threading
 import time
 from typing import Any, Mapping
@@ -14,13 +15,35 @@ STATUS_VALUES = frozenset(
     {"queued", "processing", "updated", "no_change", "failed", "unknown_timeout"}
 )
 TERMINAL_STATES = frozenset({"updated", "no_change", "failed", "unknown_timeout"})
+NOTICE_MODES = frozenset({"concise", "verbose"})
+
+_NOTICE_SECRET_PATTERNS = (
+    re.compile(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.I | re.S),
+    re.compile(r"\b(?:api[_-]?key|token|secret|password|authorization|cookie)\s*[:=]\s*[^\s,;]+", re.I),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}", re.I),
+    re.compile(r"\b(?:sk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{12,}", re.I),
+    re.compile(r"([?&](?:api[_-]?key|token|secret|password|sig)=)[^&#\s]+", re.I),
+)
 
 
-def public_status_rows(rows: list[dict[str, Any]], *, limit: int = 50) -> list[dict[str, Any]]:
-    """Expose only bounded status metadata to the WebApp panel."""
+def redact_notice_preview(value: Any, *, limit: int = 120) -> str:
+    """Create a short deterministic preview without calling a model or storing raw content."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    for pattern in _NOTICE_SECRET_PATTERNS:
+        text = pattern.sub(lambda match: match.group(1) + "[已隐藏]" if match.lastindex else "[已隐藏]", text)
+    text = text.strip()
+    if limit < 1:
+        return ""
+    return text[: limit - 1] + "…" if len(text) > limit and limit > 1 else text[:limit]
+
+
+def public_status_rows(
+    rows: list[dict[str, Any]], *, limit: int = 50, include_previews: bool = False
+) -> list[dict[str, Any]]:
+    """Expose bounded status metadata and optional plugin-redacted previews."""
     result = []
     for row in rows[: max(0, min(int(limit), 50))]:
-        result.append({
+        item = {
             "key": dict(row.get("key") or {}),
             "status": row.get("status"),
             "layer": row.get("layer"),
@@ -29,7 +52,18 @@ def public_status_rows(rows: list[dict[str, Any]], *, limit: int = 50) -> list[d
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
             "panel_only": bool(row.get("panel_only", False)),
-        })
+        }
+        if include_previews:
+            item["notice_previews"] = [
+                {
+                    "record_id": str(preview.get("record_id")),
+                    "text": redact_notice_preview(preview.get("text"), limit=120),
+                    "version": int(preview.get("version", 0) or 0),
+                }
+                for preview in (row.get("notice_previews") or [])
+                if isinstance(preview, Mapping) and preview.get("record_id") and preview.get("text")
+            ][:3]
+        result.append(item)
     return result
 
 
@@ -75,6 +109,7 @@ class MemberMemoryStatus:
     updated_at: float
     message_id: str | None = None
     panel_only: bool = False
+    notice_previews: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -329,6 +364,7 @@ class MemoryStatusCoordinator:
             layer=getattr(result, "layer", None),
             new_ids=list(getattr(result, "new_ids", ()) or ()),
             error_code=getattr(result, "error_code", None),
+            notice_previews=list(getattr(result, "previews", ()) or ()),
         )
         if late:
             return row
@@ -370,9 +406,10 @@ class MemoryStatusNotifier:
     human-facing notice path.
     """
 
-    def __init__(self, post_message, *, capability: dict[str, Any]) -> None:
+    def __init__(self, post_message, *, capability: dict[str, Any], notice_mode: str = "concise") -> None:
         self._post_message = post_message
         self.capability = capability
+        self.notice_mode = notice_mode if notice_mode in NOTICE_MODES else "concise"
 
     def begin(self, context: TurnObservationContext, member_ids: tuple[str, ...] | list[str]) -> str | None:
         # Deliberately silent while extraction is running.  ``context`` and
@@ -396,12 +433,30 @@ class MemoryStatusNotifier:
             return None
         return "🧠 L1 已写入：" + "、".join(written)
 
+    def _summary(self, statuses: list[dict[str, Any]]) -> str | None:
+        if self.notice_mode != "verbose":
+            return self._write_summary(statuses)
+        detailed: list[str] = []
+        for row in statuses:
+            if row.get("status") != "updated":
+                continue
+            key = row.get("key") if isinstance(row.get("key"), Mapping) else {}
+            member = str(key.get("member_id") or "未知角色")
+            previews = row.get("notice_previews") or []
+            text = next(
+                (redact_notice_preview(item.get("text"), limit=120)
+                 for item in previews if isinstance(item, Mapping) and item.get("text")),
+                "",
+            )
+            detailed.append(f"{member} · {text}" if text else f"{member} 1 条")
+        return "🧠 L1 已写入：" + "；".join(detailed) if detailed else None
+
     def finalize(self, context: TurnObservationContext, statuses: list[dict[str, Any]], *, late: bool = False) -> None:
         if late:
             return
         if not self.capability.get("enabled") or not self.capability.get("editable"):
             return
-        text = self._write_summary(statuses)
+        text = self._summary(statuses)
         if not text:
             return
         try:
@@ -414,7 +469,7 @@ class MemoryStatusNotifier:
 
 
 class MemoryStatusStore:
-    """Small JSONL-backed store; it deliberately stores status metadata only."""
+    """Small JSONL-backed store with bounded, redacted notice previews only."""
 
     def __init__(
         self,
@@ -467,6 +522,15 @@ class MemoryStatusStore:
         ids = row.get("new_ids", [])
         if not isinstance(ids, list):
             ids = []
+        previews = []
+        for preview in row.get("notice_previews") or []:
+            if not isinstance(preview, Mapping) or not preview.get("record_id") or not preview.get("text"):
+                continue
+            previews.append({
+                "record_id": str(preview["record_id"])[:128],
+                "text": redact_notice_preview(preview["text"], limit=120),
+                "version": int(preview.get("version", 0) or 0),
+            })
         return {
             "key": key.as_dict(),
             "scope": {
@@ -482,6 +546,7 @@ class MemoryStatusStore:
             "updated_at": float(row.get("updated_at", row.get("created_at", 0))),
             "message_id": str(row["message_id"]) if row.get("message_id") else None,
             "panel_only": bool(row.get("panel_only", False)),
+            "notice_previews": previews[:3],
         }
 
     def _persist(self) -> None:
@@ -554,6 +619,7 @@ class MemoryStatusStore:
                     "updated_at": now,
                     "message_id": message_id,
                     "panel_only": bool(panel_only),
+                    "notice_previews": [],
                 }
                 self._records[storage_key] = row
                 changed = True
@@ -578,6 +644,7 @@ class MemoryStatusStore:
         error_code: str | None = None,
         message_id: str | None = None,
         panel_only: bool | None = None,
+        notice_previews: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
     ) -> dict[str, Any]:
         if status not in STATUS_VALUES:
             raise ValueError(f"unknown memory status: {status}")
@@ -602,6 +669,8 @@ class MemoryStatusStore:
                 row["message_id"] = str(message_id)
             if panel_only is not None:
                 row["panel_only"] = bool(panel_only)
+            if notice_previews is not None:
+                row["notice_previews"] = self._sanitize({"key": row["key"], "notice_previews": notice_previews}).get("notice_previews", [])
             self._prune(float(self.clock()))
             self._persist()
             return dict(row)

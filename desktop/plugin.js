@@ -47,6 +47,10 @@ function memoryStatusNotice(rows) {
     .filter(row => row?.status === 'updated')
     .map(row => {
       const member = row?.key?.member_id ?? '未知角色'
+      const preview = Array.isArray(row?.notice_previews)
+        ? row.notice_previews.find(item => item?.text)?.text
+        : ''
+      if (preview) return `${member} · ${preview}`
       const count = Array.isArray(row?.new_ids) && row.new_ids.length > 0 ? row.new_ids.length : 1
       return `${member} ${count} 条`
     })
@@ -295,6 +299,7 @@ function RoleClaimPanel() {
   const [sharedMemoryId, setSharedMemoryId] = useState('')
   const [memoryStatuses, setMemoryStatuses] = useState([])
   const [memoryStatusMessage, setMemoryStatusMessage] = useState('')
+  const [noticeMode, setNoticeMode] = useState('concise')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const catalogEpoch = useRef(createRequestEpoch())
@@ -390,11 +395,24 @@ function RoleClaimPanel() {
       if (!memoryStatusEpoch.current.isCurrent(requestId)) return
       const statuses = memoryStatusItems(value)
       setMemoryStatuses(statuses)
+      if (value?.notice_mode === 'verbose' || value?.notice_mode === 'concise') setNoticeMode(value.notice_mode)
       setMemoryStatusMessage(statuses.length ? `已加载 ${statuses.length} 条状态` : '当前没有记忆处理状态')
     } catch (error) {
       if (!memoryStatusEpoch.current.isCurrent(requestId)) return
       setMemoryStatuses([])
       setMemoryStatusMessage(String(error))
+    }
+  }
+
+  const changeNoticeMode = async event => {
+    const mode = event.target.value
+    setNoticeMode(mode)
+    try {
+      const value = await groupCommand(roomId, { action: 'memory-status-mode', mode })
+      if (value?.notice_mode === 'verbose' || value?.notice_mode === 'concise') setNoticeMode(value.notice_mode)
+      setMessage(mode === 'verbose' ? '已启用详细记忆提示（插件本地脱敏）' : '已启用简洁记忆提示')
+    } catch (error) {
+      setMessage(String(error))
     }
   }
 
@@ -488,6 +506,15 @@ function RoleClaimPanel() {
     ),
     roomId && h('div', { style: SECTION_STYLE },
       h('h2', { style: { margin: '0 0 8px', fontSize: 17 } }, '4. 记忆状态'),
+      h(SelectField, {
+        label: '记忆提示级别',
+        value: noticeMode,
+        onChange: changeNoticeMode,
+        hint: noticeMode === 'verbose' ? '仅显示插件本地脱敏、截断后的 L1 预览；不会写回记忆' : '只显示角色和写入数量',
+      },
+        h('option', { value: 'concise' }, '简洁：只显示写入数量'),
+        h('option', { value: 'verbose' }, '详细：显示插件脱敏预览'),
+      ),
       h(Button, { onClick: () => loadMemoryStatus(roomId) }, '刷新记忆状态'),
       memoryStatusMessage && h('div', { role: 'status', style: { margin: '10px 0', color: '#4b5563' } }, memoryStatusMessage),
       memoryStatuses.map(row => h('div', {

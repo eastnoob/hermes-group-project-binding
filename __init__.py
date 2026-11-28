@@ -8,6 +8,7 @@ from http.client import HTTPConnection
 import json
 import os
 from pathlib import Path
+import tempfile
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -99,7 +100,7 @@ from tools.approval import request_tool_approval
 
 HERE = Path(__file__).resolve().parent
 PREFIX = "Hermes project binding "
-BUILD_ID = "webapp-routing-20261128-memory-write-notice-r32"
+BUILD_ID = "webapp-routing-20261128-memory-verbose-r33"
 RUNTIME_LOG_MAX_BYTES = 256 * 1024
 RUNTIME_LOG_BACKUPS = 3
 BLOCKED = "本群项目归属无法验证，本回合未发出模型请求"
@@ -164,6 +165,10 @@ def _memory_status_coordinator(config):
     path = state_dir(config).parent / "memory-status.jsonl"
     key = str(path)
     coordinator = MEMORY_STATUS_COORDINATORS.get(key)
+    notice_mode = _memory_status_notice_mode(config)
+    if coordinator is not None and getattr(coordinator, "notice_mode", "concise") != notice_mode:
+        coordinator = None
+        MEMORY_STATUS_COORDINATORS.pop(key, None)
     if coordinator is None:
         status_config = config.get("memoryStatus") or {}
         source = _memory_status_source(config) if status_config.get("enabled") else None
@@ -177,6 +182,7 @@ def _memory_status_coordinator(config):
             notifier = MemoryStatusNotifier(
                 MEMORY_STATUS_CONTEXT.post_message,
                 capability={"enabled": True, "editable": True},
+                notice_mode=notice_mode,
             )
         coordinator = MemoryStatusCoordinator(
             store=MemoryStatusStore(path),
@@ -184,6 +190,7 @@ def _memory_status_coordinator(config):
             notifier=notifier,
             require_prepared_baseline=True,
         )
+        coordinator.notice_mode = notice_mode
         MEMORY_STATUS_COORDINATORS[key] = coordinator
     return coordinator
 
@@ -233,7 +240,10 @@ def _memory_status_source(config):
             except json.JSONDecodeError:
                 raise RuntimeError(f"memory core HTTP {error.code}") from error
 
-    return CoreGenerationLogMemoryStatusSource(request)
+    return CoreGenerationLogMemoryStatusSource(
+        request,
+        include_previews=_memory_status_notice_mode(config) == "verbose",
+    )
 
 
 def call_meta(config, route, payload):
@@ -306,7 +316,38 @@ def memory_status_rows(config, room_id, limit=50):
     except (TypeError, ValueError):
         limit = 50
     rows = _memory_status_coordinator(config).store.snapshot(room_id, limit=limit)
-    return public_status_rows(rows, limit=limit)
+    return public_status_rows(
+        rows,
+        limit=limit,
+        include_previews=_memory_status_notice_mode(config) == "verbose",
+    )
+
+
+def _memory_status_notice_mode(config):
+    shared_path = state_dir(config).parent / "memory-notice-mode.json"
+    try:
+        shared = json.loads(shared_path.read_text(encoding="utf-8"))
+        value = str(shared.get("notice_mode", "")).lower()
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        value = ""
+    if not value:
+        value = str((config.get("memoryStatus") or {}).get("noticeMode", "concise")).lower()
+    return value if value in {"concise", "verbose"} else "concise"
+
+
+def _set_memory_status_notice_mode(config, mode):
+    mode = str(mode or "").lower()
+    if mode not in {"concise", "verbose"}:
+        raise ValueError("memory notice mode must be concise or verbose")
+    path = state_dir(config).parent / "memory-notice-mode.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        json.dump({"notice_mode": mode}, handle, ensure_ascii=False)
+        handle.write("\n")
+        temporary = Path(handle.name)
+    os.replace(temporary, path)
+    MEMORY_STATUS_COORDINATORS.pop(str(state_dir(config).parent / "memory-status.jsonl"), None)
+    return mode
 
 
 def dynamic_scope(config, room, team, task, assignments):
@@ -363,7 +404,7 @@ def group_binding_command(raw_args, session_id="", source=None, **_):
     room_id = payload.get("room_id")
     if not isinstance(room_id, str) or not room_id.strip():
         raise ValueError("group binding room_id is required")
-    if action not in {"catalog", "roles", "memory-assets", "memory-status", "prepare", "submit"}:
+    if action not in {"catalog", "roles", "memory-assets", "memory-status", "memory-status-mode", "prepare", "submit"}:
         raise ValueError("unknown group binding action")
     config = settings()
     if action == "catalog":
@@ -384,7 +425,9 @@ def group_binding_command(raw_args, session_id="", source=None, **_):
         return json.dumps({"assets": assets}, ensure_ascii=False)
     if action == "memory-status":
         rows = memory_status_rows(config, room_id, payload.get("limit", 50))
-        return json.dumps({"statuses": rows}, ensure_ascii=False)
+        return json.dumps({"statuses": rows, "notice_mode": _memory_status_notice_mode(config)}, ensure_ascii=False)
+    if action == "memory-status-mode":
+        return json.dumps({"notice_mode": _set_memory_status_notice_mode(config, payload.get("mode"))}, ensure_ascii=False)
     if action == "prepare":
         team_id = payload.get("team_id")
         task_id = payload.get("task_id")

@@ -79,7 +79,7 @@ Runtime diagnostics are written to `runtime-trace.jsonl` and `runtime-errors.jso
 
 ## Memory status panel and group notice
 
-The plugin can keep a bounded, metadata-only status history for asynchronous
+The plugin can keep a bounded status history for asynchronous
 Tencent L1 extraction. The optional external `project-options.json` setting is
 disabled by default until the current Hermes `bot_room` host passes the real
 capability probe:
@@ -90,7 +90,8 @@ capability probe:
     "enabled": false,
     "groupNoticeEnabled": false,
     "coreEndpoint": "http://memory-core:8420",
-    "coreServiceToken": "<external-only>"
+    "coreServiceToken": "<external-only>",
+    "noticeMode": "concise"
   }
 }
 ```
@@ -103,13 +104,19 @@ Core's read-only memory-generation log and pipeline status routes, then matches
 the frozen Team/Agent/User/Task/Session scope and a pre-turn L1 baseline. If
 that source or its external token is unavailable, status remains panel-only.
 The plugin never uses `atomic/write`, never sends a second model turn for a
-notice, and does not store prompt or memory content in the status file. The
-Core token must be supplied outside GitHub (for example through the external
-project options file or `MEMORY_STATUS_CORE_SERVICE_TOKEN`).
+notice, and never stores raw memory content. `noticeMode: concise` only reports
+the role and count. The WebApp can opt a room into `verbose`; then the plugin
+uses the existing scoped read-only `atomic/query`, applies deterministic secret
+filtering and truncation, and stores only the bounded redacted preview needed
+for the toast. It never claims `store`/`update`/`merge` because Core does not
+expose those operations in the read contract. The Core token must be supplied
+outside GitHub (for example through the external project options file or
+`MEMORY_STATUS_CORE_SERVICE_TOKEN`).
 
 Group notices follow Hermes' native write-notification behavior: they stay silent
 while extraction is running and when a turn adds nothing. After a scoped L1
 write is confirmed, one concise notice is shown, for example
 `🧠 L1 已写入：hub 2 条`. Unknown, failed, and no-change results remain in the
-WebApp status panel and are never rendered as an L1 success. The notice contains
-the role and count only; memory content is not copied into the chat.
+WebApp status panel and are never rendered as an L1 success. In verbose mode the
+same notice may include a plugin-redacted preview, but raw memory is never sent
+to chat or back into the model context.

@@ -8,9 +8,9 @@ import time
 from typing import Any, Callable, Mapping
 
 try:
-    from .memory_status import MemoryObservationKey
+    from .memory_status import MemoryObservationKey, redact_notice_preview
 except ImportError:
-    from memory_status import MemoryObservationKey
+    from memory_status import MemoryObservationKey, redact_notice_preview
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,7 @@ class MemoryCheckResult:
     new_ids: tuple[str, ...] = ()
     error_code: str | None = None
     observed_at: float = 0.0
+    previews: tuple[Mapping[str, Any], ...] = ()
 
 
 class ReadOnlyMemoryStatusSource:
@@ -137,11 +138,13 @@ class CoreGenerationLogMemoryStatusSource:
         clock=time.time,
         sleep=time.sleep,
         grace_seconds: float = 2.0,
+        include_previews: bool = False,
     ) -> None:
         self._request = request
         self._clock = clock
         self._sleep = sleep
         self._grace_seconds = max(0.0, float(grace_seconds))
+        self._include_previews = bool(include_previews)
 
     @staticmethod
     def _data(response: Mapping[str, Any], *, error_code: str) -> Mapping[str, Any]:
@@ -228,6 +231,46 @@ class CoreGenerationLogMemoryStatusSource:
         l1 = data.get("l1")
         return isinstance(l1, Mapping) and l1.get("idle") is True
 
+    def _record_previews(
+        self, observation: MemoryObservation, record_ids: set[str]
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Read matching records through the existing scoped query and redact locally.
+
+        This is intentionally best-effort: failure to obtain a preview must not
+        turn a proven L1 write into a false failure.
+        """
+        if not self._include_previews or not record_ids:
+            return ()
+        body = {
+            "limit": 100,
+            **{
+                field: value
+                for field, value in observation.scope.items()
+                if field in {"team_id", "agent_id", "user_id", "task_id"}
+            },
+        }
+        try:
+            response = self._request("POST", "/v3/atomic/query", body=body)
+            data = self._data(response, error_code="memory_atomic_query_error")
+            items = data.get("items") or []
+            if not isinstance(items, list):
+                return ()
+        except Exception:
+            return ()
+        previews = []
+        for item in items:
+            if not isinstance(item, Mapping) or str(item.get("id")) not in record_ids:
+                continue
+            content = item.get("content")
+            if not content:
+                continue
+            previews.append({
+                "record_id": str(item["id"]),
+                "text": redact_notice_preview(content, limit=120),
+                "version": int(item.get("version", 0) or 0),
+            })
+        return tuple(previews[:3])
+
     def poll(
         self,
         observation: MemoryObservation,
@@ -255,8 +298,10 @@ class CoreGenerationLogMemoryStatusSource:
                     continue
                 new_ids.update(set(self._output_ids(detail)) - set(baseline))
             if new_ids:
+                previews = self._record_previews(observation, new_ids)
                 return MemoryCheckResult(
-                    status="updated", layer="L1", new_ids=tuple(sorted(new_ids)), observed_at=observed_at
+                    status="updated", layer="L1", new_ids=tuple(sorted(new_ids)),
+                    observed_at=observed_at, previews=previews,
                 )
             if observed_at >= observation.observed_after + self._grace_seconds and self._pipeline_idle():
                 return MemoryCheckResult(status="no_change", observed_at=observed_at)
