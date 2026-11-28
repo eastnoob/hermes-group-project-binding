@@ -191,12 +191,13 @@ class MemoryStatusCoordinator:
             message_id = self.notifier.begin(context, tuple(context.expected_member_ids))
         self._groups[group_key] = context
         self._message_ids[group_key] = message_id
+        panel_only = self.notifier is None
         for member_id in context.expected_member_ids:
             scope = dict(context.scopes.get(member_id) or {})
             key = self._key(context, member_id)
             self.store.begin(
                 key,
-                panel_only=message_id is None,
+                panel_only=panel_only,
                 message_id=message_id,
                 scope=scope,
             )

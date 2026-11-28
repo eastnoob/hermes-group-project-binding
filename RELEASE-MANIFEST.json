@@ -4,11 +4,11 @@
   "files": [
     {
       "path": "plugin.yaml",
-      "sha256": "c133db9c9ecc2e9172d4955eb198bf0493e7089a63b4f5bbd74be6e946f49a59"
+      "sha256": "f0f8d97556775f450beb4dad336c7f794d024817b9459235bf16d909d8e4938b"
     },
     {
       "path": "__init__.py",
-      "sha256": "bbef7cfcf7a9199bb49f96159a5933e527b706d8a9cdec7187c9084466ccf570"
+      "sha256": "8108fa97d63d6b4153879f595dfd233b2b3d3f80d9519d24da70aaa9fa3f1fd7"
     },
     {
       "path": "binding.py",
@@ -24,7 +24,7 @@
     },
     {
       "path": "memory_status.py",
-      "sha256": "62b1c1d33ba7753f2867bd97013694aac9c999397aa3931f61ba604cdb57e4ea"
+      "sha256": "1e1f90b88ec3cfd7ab779be19bc25d3ad97dd7616548ab21cc86a86d178dbe67"
     },
     {
       "path": "memory_status_source.py",
