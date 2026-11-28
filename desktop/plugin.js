@@ -4,6 +4,22 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 const h = React.createElement
 const { Button, ROUTES_AREA, host } = sdk
 const SIDEBAR_NAV_AREA = 'sidebar.nav'
+const MEMORY_NOTICE_PREFIX = 'plugin-message:hermes-group-project-binding:'
+
+function forwardMemoryStatusNotice(event) {
+  const payload = event?.payload ?? {}
+  const key = String(payload.key ?? payload.id ?? '')
+  const text = String(payload.text ?? '').trim()
+  if (!key.startsWith(MEMORY_NOTICE_PREFIX) || !text || typeof host.notify !== 'function') return
+  const processing = text.includes('处理中')
+  host.notify({
+    id: key,
+    kind: 'info',
+    message: text,
+    durationMs: processing ? 0 : 8000,
+    persistent: processing,
+  })
+}
 
 function createRequestEpoch() {
   let current = 0
@@ -404,6 +420,9 @@ export default {
   description: '在 WebApp 中选择 Canonical 群的 Team、项目和角色',
   defaultEnabled: false,
   register(ctx) {
+    const disposeNotice = typeof host.onEvent === 'function'
+      ? host.onEvent('notification.show', forwardMemoryStatusNotice)
+      : () => {}
     const dispose = ctx.register({
       id: 'role-claim',
       area: ROUTES_AREA,
@@ -422,6 +441,7 @@ export default {
       console.warn('[hermes-group-project-binding] sidebar navigation unavailable', error)
     }
     ctx.onDispose(() => {
+      disposeNotice()
       dispose()
       disposeNav()
     })

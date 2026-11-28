@@ -4,11 +4,11 @@
   "files": [
     {
       "path": "plugin.yaml",
-      "sha256": "894c1a2e881a5aac33402202b2a94f349084a08fcb6ed7206dc780dbb98b045c"
+      "sha256": "ed35531e076187a3f27f646b0a34fdbd823ef8aa448b310d9092e888e063e757"
     },
     {
       "path": "__init__.py",
-      "sha256": "932aafafc6198408222c2d9f7456d92fd89179e29ef750890bd8689fadad658f"
+      "sha256": "9e8ffd3e4f3eb73078a2c0671529fa3f74e2f644eb6878e940bb5cb68ca0c6d5"
     },
     {
       "path": "binding.py",
@@ -44,7 +44,7 @@
     },
     {
       "path": "desktop/plugin.js",
-      "sha256": "46dc3998b9b01405afbe2ebfc5d9b165d15198eb61395301054bd52d3adb969a"
+      "sha256": "b30c74e73c7c319a898d495cdaf304f01ad1baad92790193fbdfb7a8ddf246f2"
     }
   ]
 }
