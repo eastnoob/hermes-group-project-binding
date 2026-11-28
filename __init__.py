@@ -6,9 +6,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from http.client import HTTPConnection
 import json
+import os
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
 from uuid import uuid4
+import time
 
 try:
     from .binding import (
@@ -39,6 +43,11 @@ try:
         unbind_asset,
     )
     from .runtime_logs import append_json_line
+    from .memory_status import (
+        MemoryObservationKey, MemoryStatusCoordinator, MemoryStatusStore,
+        MemoryStatusNotifier, TurnObservationContext, public_status_rows,
+    )
+    from .memory_status_source import CoreGenerationLogMemoryStatusSource
 except ImportError:
     from binding import (
         binding_headers,
@@ -68,6 +77,11 @@ except ImportError:
         unbind_asset,
     )
     from runtime_logs import append_json_line
+    from memory_status import (
+        MemoryObservationKey, MemoryStatusCoordinator, MemoryStatusStore,
+        MemoryStatusNotifier, TurnObservationContext, public_status_rows,
+    )
+    from memory_status_source import CoreGenerationLogMemoryStatusSource
 
 from hermes_cli.gateway_client import connect_gateway
 from hermes_cli.gateway_runtime import discover_gateway_endpoint
@@ -85,13 +99,16 @@ from tools.approval import request_tool_approval
 
 HERE = Path(__file__).resolve().parent
 PREFIX = "Hermes project binding "
-BUILD_ID = "webapp-routing-20261127-status-r26"
+BUILD_ID = "webapp-routing-20261128-memory-live-r27"
 RUNTIME_LOG_MAX_BYTES = 256 * 1024
 RUNTIME_LOG_BACKUPS = 3
 BLOCKED = "本群项目归属无法验证，本回合未发出模型请求"
 SAVED = "本群项目已确认，可以正常聊天"
 SCOPES = {}
 APPROVALS = {}
+MEMORY_STATUS_COORDINATORS = {}
+MEMORY_STATUS_CONTEXT = None
+MEMORY_STATUS_CONTEXTS = {}
 
 
 def result(message):
@@ -124,6 +141,74 @@ def note_trace(phase, **data):
         )
     except Exception:
         pass
+
+
+def _memory_status_coordinator(config):
+    path = state_dir(config).parent / "memory-status.jsonl"
+    key = str(path)
+    coordinator = MEMORY_STATUS_COORDINATORS.get(key)
+    if coordinator is None:
+        status_config = config.get("memoryStatus") or {}
+        source = _memory_status_source(config) if status_config.get("enabled") else None
+        notifier = None
+        if status_config.get("enabled") and status_config.get("groupNoticeEnabled") and MEMORY_STATUS_CONTEXT is not None:
+            notifier = MemoryStatusNotifier(
+                MEMORY_STATUS_CONTEXT.post_message,
+                capability={"enabled": True, "editable": True},
+            )
+        coordinator = MemoryStatusCoordinator(
+            store=MemoryStatusStore(path), source=source, notifier=notifier,
+        )
+        MEMORY_STATUS_COORDINATORS[key] = coordinator
+    return coordinator
+
+
+def _memory_status_source(config):
+    """Build the optional direct-Core read-only source from external config."""
+    status_config = config.get("memoryStatus") or {}
+    endpoint = str(
+        status_config.get("coreEndpoint")
+        or os.environ.get("MEMORY_STATUS_CORE_ENDPOINT", "")
+    ).rstrip("/")
+    if not endpoint:
+        host = os.environ.get("MEMORY_TENCENTDB_GATEWAY_HOST", "")
+        port = os.environ.get("MEMORY_TENCENTDB_GATEWAY_PORT", "8420")
+        if host:
+            endpoint = f"http://{host}:{port}"
+    if not endpoint:
+        return None
+    service_token = str(
+        status_config.get("coreServiceToken")
+        or os.environ.get("MEMORY_STATUS_CORE_SERVICE_TOKEN", "local-proxy")
+    )
+    service_id = str(status_config.get("spaceId") or config.get("spaceId") or "default")
+
+    def request(method, path, *, body=None, params=None):
+        url = endpoint + path
+        if params:
+            url += "?" + urlencode(params)
+        payload = None if body is None else json.dumps(body).encode("utf-8")
+        req = Request(
+            url,
+            data=payload,
+            method=method,
+            headers={
+                "Authorization": "Bearer " + service_token,
+                "x-tdai-service-id": service_id,
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urlopen(req, timeout=8) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            body_text = error.read().decode("utf-8", "replace")
+            try:
+                return json.loads(body_text)
+            except json.JSONDecodeError:
+                raise RuntimeError(f"memory core HTTP {error.code}") from error
+
+    return CoreGenerationLogMemoryStatusSource(request)
 
 
 def call_meta(config, route, payload):
@@ -188,6 +273,17 @@ def dynamic_memory_assets(config, team_id):
     return list_shared_assets(config, team_id)
 
 
+def memory_status_rows(config, room_id, limit=50):
+    if not isinstance(room_id, str) or not room_id.strip():
+        raise ValueError("memory-status room_id is required")
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 50
+    rows = _memory_status_coordinator(config).store.snapshot(room_id, limit=limit)
+    return public_status_rows(rows, limit=limit)
+
+
 def dynamic_scope(config, room, team, task, assignments):
     """Build a scope from live Core rows and the authenticated room roster."""
     return build_scope(room, {**team, "space_id": config["spaceId"]}, task, assignments)
@@ -242,7 +338,7 @@ def group_binding_command(raw_args, session_id="", source=None, **_):
     room_id = payload.get("room_id")
     if not isinstance(room_id, str) or not room_id.strip():
         raise ValueError("group binding room_id is required")
-    if action not in {"catalog", "roles", "memory-assets", "prepare", "submit"}:
+    if action not in {"catalog", "roles", "memory-assets", "memory-status", "prepare", "submit"}:
         raise ValueError("unknown group binding action")
     config = settings()
     if action == "catalog":
@@ -261,6 +357,9 @@ def group_binding_command(raw_args, session_id="", source=None, **_):
         assets = dynamic_memory_assets(config, team_id)
         note_trace("memory-assets", room=room_id, team=team_id, count=len(assets))
         return json.dumps({"assets": assets}, ensure_ascii=False)
+    if action == "memory-status":
+        rows = memory_status_rows(config, room_id, payload.get("limit", 50))
+        return json.dumps({"statuses": rows}, ensure_ascii=False)
     if action == "prepare":
         team_id = payload.get("team_id")
         task_id = payload.get("task_id")
@@ -544,6 +643,80 @@ def _binding_for_turn(config, state, member, source, events):
             "source_text": source["payload"]["text"]}
 
 
+def _memory_observation_context(config, session_id, user_message, task_id=""):
+    """Resolve a bound bot-room turn into a metadata-only memory observation."""
+    if session_surface() != "bot_room" or not isinstance(user_message, str):
+        return None
+    current = asyncio.run(source_turn(config, session_id, user_message, task_id=task_id))
+    if current is None:
+        return None
+    state, member, source, events = current
+    binding = _binding_for_turn(config, state, member, source, events)
+    record = read_room_binding(state_dir(config), state["room"]["room_id"])
+    if not isinstance(record, dict) or not record.get("event_id"):
+        return None
+    scope = binding["scope"]
+    scopes = {}
+    expected = []
+    for member_id, role in (scope.get("roles") or {}).items():
+        expected.append(member_id)
+        scopes[member_id] = {
+            "team_id": scope["team_id"],
+            "agent_id": role["agent_id"],
+            "user_id": config.get("userId", ""),
+            "task_id": scope["task_id"],
+            "conversation_id": role["conversation_id"],
+            "binding_revision": record["event_id"],
+        }
+    return TurnObservationContext(
+        surface="bot_room",
+        room_id=state["room"]["room_id"],
+        authority_epoch=int(state["room"]["authority_epoch"]),
+        source_event_seq=int(source["seq"]),
+        binding_revision=str(record["event_id"]),
+        expected_member_ids=tuple(expected),
+        scopes=scopes,
+        observed_after=time.time(),
+    )
+
+
+def observe_memory_before_turn(session_id="", turn_id="", user_message=None, **kwargs):
+    """Capture read-only L1 baselines before the turn can be extracted."""
+    try:
+        config = settings()
+        if not bool((config.get("memoryStatus") or {}).get("enabled", False)):
+            return None
+        context = _memory_observation_context(
+            config, session_id, user_message, task_id=kwargs.get("task_id", "")
+        )
+        if context is None:
+            return None
+        MEMORY_STATUS_CONTEXTS[(session_id, turn_id)] = context
+        _memory_status_coordinator(config).prepare(context)
+    except Exception as error:
+        note_error(error)
+    return None
+
+
+def observe_memory_after_turn(session_id="", turn_id="", user_message=None, **kwargs):
+    """Observe a completed bound room turn without modifying model input or L1."""
+    try:
+        config = settings()
+        if not bool((config.get("memoryStatus") or {}).get("enabled", False)):
+            return None
+        context = MEMORY_STATUS_CONTEXTS.pop((session_id, turn_id), None)
+        if context is None:
+            context = _memory_observation_context(
+                config, session_id, user_message, task_id=kwargs.get("task_id", "")
+            )
+        if context is None:
+            return None
+        _memory_status_coordinator(config).observe(context)
+    except Exception as error:
+        note_error(error)
+    return None
+
+
 def _status_for_room(config, state, member, source, events):
     """Read and validate the current room binding without routing a model turn."""
     room_id = state["room"]["room_id"]
@@ -612,6 +785,12 @@ def confirm_or_route(session_id, turn_id, user_message=None, **_):
                 return None
             scope = _binding_for_turn(config, state, member, source, events)
             SCOPES[session_id] = (turn_id, member["member_id"], scope)
+            observe_memory_before_turn(
+                session_id=session_id,
+                turn_id=turn_id,
+                user_message=user_message,
+                task_id=task_id,
+            )
             return None
         mode, project_id, handle = command
         if handle != member["handle"]:
@@ -661,6 +840,8 @@ def apply_scope(request, session_id, turn_id, **_):
 
 
 def register(ctx):
+    global MEMORY_STATUS_CONTEXT
+    MEMORY_STATUS_CONTEXT = ctx
     note_trace("loaded", build=BUILD_ID, profile=settings().get("profile"))
     ctx.register_command(
         "group-binding",
@@ -669,6 +850,8 @@ def register(ctx):
         args_hint="<json>",
     )
     ctx.register_hook("pre_llm_call", confirm_or_route)
+    ctx.register_hook("pre_llm_call", observe_memory_before_turn)
+    ctx.register_hook("post_llm_call", observe_memory_after_turn)
     ctx.register_hook("post_approval_response", approval_answer)
     ctx.register_middleware("llm_request", apply_scope)
 

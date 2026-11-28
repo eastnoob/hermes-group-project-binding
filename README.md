@@ -76,3 +76,37 @@ Task; changing the Task keeps the selected asset in the proposal.
 `rooms` is optional. Omit it to let the plugin discover rooms from the owner Gateway. An unlisted or unconfirmed room continues with native Hermes routing until it receives a project initialization command.
 
 Runtime diagnostics are written to `runtime-trace.jsonl` and `runtime-errors.jsonl`. Each file is capped at 256 KiB with three rotated backups, so recent routing and failure evidence remains available without unbounded log or cache growth.
+
+## Memory status panel and group notice
+
+The plugin can keep a bounded, metadata-only status history for asynchronous
+Tencent L1 extraction. The optional external `project-options.json` setting is
+disabled by default until the current Hermes `bot_room` host passes the real
+capability probe:
+
+```json
+{
+  "memoryStatus": {
+    "enabled": false,
+    "groupNoticeEnabled": false,
+    "coreEndpoint": "http://memory-core:8420",
+    "coreServiceToken": "<external-only>"
+  }
+}
+```
+
+When enabled after that probe, the WebApp panel shows `queued`, `processing`,
+`updated`, `no_change`, `failed`, and `unknown_timeout` states. A group status
+message is used only when the host proves that one message can be posted and
+edited; otherwise the panel remains the source of truth. The live source reads
+Core's read-only memory-generation log and pipeline status routes, then matches
+the frozen Team/Agent/User/Task/Session scope and a pre-turn L1 baseline. If
+that source or its external token is unavailable, status remains panel-only.
+The plugin never uses `atomic/write`, never sends a second model turn for a
+notice, and does not store prompt or memory content in the status file. The
+Core token must be supplied outside GitHub (for example through the external
+project options file or `MEMORY_STATUS_CORE_SERVICE_TOKEN`).
+
+Group notices use concise labels such as `🧠 记忆处理中 · hub、slave` followed
+by `🧠 L1：hub 已更新 · slave 本轮无新增`. Unknown or failed evidence is shown
+as `无法确认`/`处理失败`; it is never rendered as an L1 success.

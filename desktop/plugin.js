@@ -45,6 +45,22 @@ function memoryAssetItems(value) {
   return []
 }
 
+function memoryStatusItems(value) {
+  const candidates = [value, value?.result, value?.output, value?.result?.output]
+  for (const candidate of candidates) {
+    let parsed = candidate
+    if (typeof parsed === 'string') {
+      try {
+        parsed = JSON.parse(parsed)
+      } catch {
+        continue
+      }
+    }
+    if (Array.isArray(parsed?.statuses)) return parsed.statuses
+  }
+  return []
+}
+
 const PANEL_STYLE = {
   padding: 24,
   maxWidth: 820,
@@ -171,11 +187,14 @@ function RoleClaimPanel() {
   const [selections, setSelections] = useState({})
   const [memoryAssets, setMemoryAssets] = useState([])
   const [sharedMemoryId, setSharedMemoryId] = useState('')
+  const [memoryStatuses, setMemoryStatuses] = useState([])
+  const [memoryStatusMessage, setMemoryStatusMessage] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const catalogEpoch = useRef(createRequestEpoch())
   const roleEpoch = useRef(createRequestEpoch())
   const memoryEpoch = useRef(createRequestEpoch())
+  const memoryStatusEpoch = useRef(createRequestEpoch())
 
   useEffect(() => {
     rooms().then(rows => {
@@ -198,6 +217,9 @@ function RoleClaimPanel() {
     setSelections({})
     setMemoryAssets([])
     setSharedMemoryId('')
+    memoryStatusEpoch.current.next()
+    setMemoryStatuses([])
+    setMemoryStatusMessage('')
     setMessage('正在读取群成员、Team 和项目…')
     try {
       const value = await groupCommand(id, { action: 'catalog' })
@@ -254,9 +276,29 @@ function RoleClaimPanel() {
     }
   }
 
+  const loadMemoryStatus = async id => {
+    const requestId = memoryStatusEpoch.current.next()
+    setMemoryStatusMessage('正在读取记忆处理状态…')
+    try {
+      const value = await groupCommand(id, { action: 'memory-status', limit: 20 })
+      if (!memoryStatusEpoch.current.isCurrent(requestId)) return
+      const statuses = memoryStatusItems(value)
+      setMemoryStatuses(statuses)
+      setMemoryStatusMessage(statuses.length ? `已加载 ${statuses.length} 条状态` : '当前没有记忆处理状态')
+    } catch (error) {
+      if (!memoryStatusEpoch.current.isCurrent(requestId)) return
+      setMemoryStatuses([])
+      setMemoryStatusMessage(String(error))
+    }
+  }
+
   useEffect(() => {
     if (roomId && teamId) void loadMemoryAssets(teamId)
   }, [roomId, teamId])
+
+  useEffect(() => {
+    if (roomId) void loadMemoryStatus(roomId)
+  }, [roomId])
 
   const submit = async () => {
     setBusy(true)
@@ -337,6 +379,20 @@ function RoleClaimPanel() {
         h(Button, { disabled: busy || !taskId || members.some(member => !selections[member.member_id]?.task_link_id), onClick: submit }, busy ? '处理中…' : '提交并请求房主确认')
         ),
       )
+    ),
+    roomId && h('div', { style: SECTION_STYLE },
+      h('h2', { style: { margin: '0 0 8px', fontSize: 17 } }, '4. 记忆状态'),
+      h(Button, { onClick: () => loadMemoryStatus(roomId) }, '刷新记忆状态'),
+      memoryStatusMessage && h('div', { role: 'status', style: { margin: '10px 0', color: '#4b5563' } }, memoryStatusMessage),
+      memoryStatuses.map(row => h('div', {
+        key: `${row.key?.room_id || 'room'}-${row.key?.authority_epoch || 'epoch'}-${row.key?.source_event_seq || 'event'}-${row.key?.binding_revision || 'revision'}-${row.key?.member_id || 'member'}`,
+        style: { margin: '8px 0', padding: '10px 12px', borderRadius: 8, backgroundColor: row.status === 'failed' || row.status === 'unknown_timeout' ? '#fef2f2' : '#eff6ff' },
+      },
+        h('div', { style: { fontWeight: 600 } }, `${row.key?.member_id || '未知角色'} · ${row.status || 'unknown'}`),
+        h('div', { style: { fontSize: 12, color: '#4b5563' } }, `层级：${row.layer || '未确认'}${row.panel_only ? ' · 面板模式' : ''}`),
+        h('div', { style: { fontSize: 12, color: '#6b7280' } }, `更新时间：${row.updated_at ? new Date(row.updated_at * 1000).toLocaleString() : '未知'}`),
+        row.error_code && h('div', { style: { fontSize: 12, color: '#b91c1c' } }, `错误：${row.error_code}`),
+      )),
     ),
     message && h('div', { role: 'status', style: { marginTop: 20, padding: '12px 14px', borderRadius: 8, backgroundColor: message.startsWith('插件命令出错') || message.startsWith('Error') ? '#fef2f2' : '#eff6ff', color: '#1f2937', whiteSpace: 'pre-wrap' } }, message)
   )

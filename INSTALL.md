@@ -1,25 +1,30 @@
-# Install the pinned release
+# Install
 
-Use Hermes' supported plugin installer from each target profile:
+Install the immutable GitHub commit with Hermes's supported plugin installer:
 
 ```text
-hermes plugins install OWNER/REPO --ref <40-character-commit-sha> --enable
+hermes plugins install eastnoob/hermes-group-project-binding --ref <40-character-commit-sha> --enable
 ```
 
-Install the same full commit SHA for `personalassistant-hub` and `slave`.
-Do not install a branch tip in a running profile. For an update, publish a new
-commit and explicitly reinstall it with `--force --ref <new-sha>`. Keep the
-previous installed revision as a rollback target until discovery, the WebApp
-entry, and read-only room/session checks pass.
+Install the same commit into every profile that participates in the Canonical
+group. Keep the previous commit as the rollback target. Do not copy profile
+configuration, room bindings, runtime logs, databases, or credentials into the
+plugin package.
 
-The repository may be public or private. This release contains no profile
-configuration, Tencent credentials, room bindings, memory data, runtime logs,
-caches, or databases; those remain outside GitHub.
+The optional memory-status source is configured outside this repository through
+the external project options file or environment:
 
-In a confirmed room, send `@personalassistant-hub 当前绑定` to display the
-current project scope in the group without invoking a model. Use
-`@personalassistant-hub 绑定校验` for a read-only roster/Core consistency
-check. The response never includes credentials or routing headers.
+```json
+{
+  "memoryStatus": {
+    "enabled": false,
+    "groupNoticeEnabled": false,
+    "coreEndpoint": "http://memory-core:8420",
+    "coreServiceToken": "<external-only>"
+  }
+}
+```
 
-In the WebApp form, changing the Task preserves a previously selected shared
-Chat Memory asset; the choice is included in the owner proposal.
+Enable group notices only after the Hermes `bot_room` post/edit capability probe
+passes. If the Core source or editable message capability is unavailable, the
+WebApp panel remains the source of truth.
